@@ -36,6 +36,8 @@ from caffe2.proto import caffe2_pb2
 
 from detectron.core.config import cfg
 
+from keras.preprocessing import image
+
 
 def get_image_blob(im, target_scale, target_max_size):
     """Convert an image into a network input.
@@ -48,7 +50,7 @@ def get_image_blob(im, target_scale, target_max_size):
         im_scale (float): image scale (target size) / (original size)
         im_info (ndarray)
     """
-    processed_im, im_scale = prep_im_for_blob(
+    processed_im, _, _, im_scale = prep_im_for_blob(
         im, cfg.PIXEL_MEANS, target_scale, target_max_size
     )
     blob = im_list_to_blob(processed_im)
@@ -97,7 +99,7 @@ def im_list_to_blob(ims):
     return blob
 
 
-def prep_im_for_blob(im, pixel_means, target_size, max_size):
+def prep_im_for_blob(im, pixel_means, target_size, max_size, angle=0, shear=0, channel_shift=0):
     """Prepare an image for use as a network input blob. Specially:
       - Subtract per-channel pixel mean
       - Convert to float32
@@ -107,22 +109,73 @@ def prep_im_for_blob(im, pixel_means, target_size, max_size):
     """
     im = im.astype(np.float32, copy=False)
     im -= pixel_means
-    im_shape = im.shape
-    im_size_min = np.min(im_shape[0:2])
-    im_size_max = np.max(im_shape[0:2])
+    im = image.apply_channel_shift(im, channel_shift).astype('uint8')
+
+    h, w, _ = im.shape
+    rotation_matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1)
+    rotation_matrix = np.vstack((rotation_matrix, [0, 0, 1]))
+
+    cos = np.abs(rotation_matrix[0, 0])
+    sin = np.abs(rotation_matrix[0, 1])
+
+    nw = int((h * sin) + (w * cos))
+    nh = int((h * cos) + (w * sin))
+
+    rotation_matrix[0, 2] += (nw / 2) - w / 2 + int(-np.sin(np.deg2rad(shear)) * w)
+    rotation_matrix[1, 2] += (nh / 2) - h / 2 + int(np.sin(np.deg2rad(shear)) * h)
+    # rotation_matrix[0, 2] *= zoom
+    # rotation_matrix[1, 2] *= zoom
+
+    nw += int(-np.sin(np.deg2rad(shear)) * nw)
+    nh += int(np.sin(np.deg2rad(shear)) * nh)
+
+    # nw = int(nw * zoom)
+    # nh = int(nh * zoom)
+
+    # im_shape = (nw, nh)
+    im_size_min = np.min([nw, nh])
+    im_size_max = np.max([nw, nh])
     im_scale = float(target_size) / float(im_size_min)
     # Prevent the biggest axis from being more than max_size
     if np.round(im_scale * im_size_max) > max_size:
         im_scale = float(max_size) / float(im_size_max)
-    im = cv2.resize(
-        im,
-        None,
-        None,
-        fx=im_scale,
-        fy=im_scale,
-        interpolation=cv2.INTER_LINEAR
-    )
-    return im, im_scale
+
+    rotation_matrix[0, 2] *= im_scale
+    rotation_matrix[1, 2] *= im_scale
+
+    nw = int(nw * im_scale)
+    nh = int(nh * im_scale)
+
+    scale_x_matrix = np.asarray([[im_scale, 0, 0], [0, 1, 0], [0, 0, 1]])
+    scale_y_matrix = np.asarray([[1, 0, 0], [0, im_scale, 0], [0, 0, 1]])
+
+    scale_matrix = np.dot(scale_x_matrix, scale_y_matrix)
+    # transformation_matrix = np.dot(rotation_matrix, scale_matrix)
+
+    shear_matrix = np.asarray([[1, -np.sin(shear), 0],
+                               [0, np.cos(shear), 0],
+                               [0, 0, 1]])
+
+    # zoom_matrix = np.asarray([[zoom, 0, 0],
+    #                 [0, zoom, 0],
+    #                 [0, 0, 1]])
+
+    transformation_matrix = np.dot(rotation_matrix, shear_matrix)
+    transformation_matrix = np.dot(transformation_matrix, scale_matrix)
+
+    transformed_image = cv2.warpPerspective(im, transformation_matrix, (nw, nh), borderMode=cv2.BORDER_REPLICATE)
+
+    # transformation_matrix = np.dot(rotation_matrix, shear_matrix)
+
+    # transformed_image = cv2.resize(
+    #     transformed_image,
+    #     None,
+    #     None,
+    #     fx=im_scale,
+    #     fy=im_scale,
+    #     interpolation=cv2.INTER_LINEAR
+    # )
+    return transformed_image, transformation_matrix, transformed_image.shape, im_scale
 
 
 def zeros(shape, int32=False):

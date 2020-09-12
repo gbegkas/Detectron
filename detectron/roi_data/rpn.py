@@ -36,6 +36,7 @@ def get_rpn_blob_names(is_training=True):
     """Blob names used by RPN."""
     # im_info: (height, width, image scale)
     blob_names = ['im_info']
+    blob_names += ['im_tr_matrix']
     if is_training:
         # gt boxes: (batch_idx, x1, y1, x2, y2, cls)
         blob_names += ['roidb']
@@ -59,7 +60,7 @@ def get_rpn_blob_names(is_training=True):
     return blob_names
 
 
-def add_rpn_blobs(blobs, im_scales, roidb):
+def add_rpn_blobs(blobs, im_tr_matrix, roidb, im_shapes, im_scales):
     """Add blobs needed training RPN-only and end-to-end Faster R-CNN models."""
     if cfg.FPN.FPN_ON and cfg.FPN.MULTILEVEL_RPN:
         # RPN applied to many feature levels, as in the FPN paper
@@ -82,15 +83,36 @@ def add_rpn_blobs(blobs, im_scales, roidb):
         all_anchors = foa.field_of_anchors
 
     for im_i, entry in enumerate(roidb):
+        transformation_matrix = im_tr_matrix[im_i]
         scale = im_scales[im_i]
-        im_height = np.round(entry['height'] * scale)
-        im_width = np.round(entry['width'] * scale)
+        im_height = im_shapes[im_i][0]
+        im_width = im_shapes[im_i][1]
+        # zoom = zooms[im_i]
+        # im_height = np.round(entry['height'] * scale)
+        # im_width = np.round(entry['width'] * scale)
         gt_inds = np.where(
             (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0)
         )[0]
-        gt_rois = entry['boxes'][gt_inds, :] * scale
+        # gt_rois = entry['boxes'][gt_inds, :]
+        gt_rois = []
+        for gt_roi in roidb[im_i]['boxes']:
+            w, h = gt_roi[2] - gt_roi[0], gt_roi[3] - gt_roi[1]
+            nw, nh = int(w * scale), int(h * scale)
+            center_x, center_y = gt_roi[0] + w / 2, gt_roi[1] + h / 2
+            new_center = np.dot(transformation_matrix, [[center_x], [center_y], [1.0]]).astype('int')
+            new_center_x = int(new_center[0][0])
+            new_center_y = int(new_center[1][0])
+            nbx = int(new_center_x - nw / 2)
+            nby = int(new_center_y - nh / 2)
+            nbx2 = int(nbx + nw)
+            nby2 = int(nby + nh)
+            gt_rois.append([nbx, nby, nbx2, nby2])
+
         im_info = np.array([[im_height, im_width, scale]], dtype=np.float32)
+        matrix = np.array(transformation_matrix, dtype=np.float32)
         blobs['im_info'].append(im_info)
+        blobs['im_tr_matrix'].append(matrix)
+        gt_rois = np.asarray(gt_rois, dtype=np.float32)
 
         # Add RPN targets
         if cfg.FPN.FPN_ON and cfg.FPN.MULTILEVEL_RPN:

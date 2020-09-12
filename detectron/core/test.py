@@ -32,6 +32,7 @@ from collections import defaultdict
 import cv2
 import logging
 import numpy as np
+import multiprocessing
 
 from caffe2.python import core
 from caffe2.python import workspace
@@ -45,6 +46,7 @@ import detectron.utils.blob as blob_utils
 import detectron.utils.boxes as box_utils
 import detectron.utils.image as image_utils
 import detectron.utils.keypoints as keypoint_utils
+from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,7 @@ def im_detect_all(model, im, box_proposals, timers=None):
 
         timers['misc_mask'].tic()
         cls_segms = segm_results(
-            cls_boxes, masks, boxes, im.shape[0], im.shape[1]
+            cls_boxes, masks, boxes, im.shape[0], im.shape[1], timers
         )
         timers['misc_mask'].toc()
     else:
@@ -809,9 +811,10 @@ def box_results_with_nms_and_limit(scores, boxes):
     return scores, boxes, cls_boxes
 
 
-def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w):
+def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w, timers):
     num_classes = cfg.MODEL.NUM_CLASSES
     cls_segms = [[] for _ in range(num_classes)]
+    ind = []
     mask_ind = 0
     # To work around an issue with cv2.resize (it seems to automatically pad
     # with repeated border values), we manually zero-pad the masks by 1 pixel
@@ -827,44 +830,89 @@ def segm_results(cls_boxes, masks, ref_boxes, im_h, im_w):
     # skip j = 0, because it's the background class
     for j in range(1, num_classes):
         segms = []
-        for _ in range(cls_boxes[j].shape[0]):
-            if cfg.MRCNN.CLS_SPECIFIC_MASK:
-                padded_mask[1:-1, 1:-1] = masks[mask_ind, j, :, :]
-            else:
-                padded_mask[1:-1, 1:-1] = masks[mask_ind, 0, :, :]
+        num_threads = multiprocessing.cpu_count() - 1
+        for cls_segm, indicator in Parallel(n_jobs=num_threads)(delayed(test)(k, im_w, im_h, ref_boxes, padded_mask, masks, j) for k in range(cls_boxes[j].shape[0])):
+            cls_segms[j].append(cls_segm)
+            ind.append(indicator)
+        mask_ind = mask_ind + max(ind) + 1
 
-            ref_box = ref_boxes[mask_ind, :]
-            w = ref_box[2] - ref_box[0] + 1
-            h = ref_box[3] - ref_box[1] + 1
-            w = np.maximum(w, 1)
-            h = np.maximum(h, 1)
-
-            mask = cv2.resize(padded_mask, (w, h))
-            mask = np.array(mask > cfg.MRCNN.THRESH_BINARIZE, dtype=np.uint8)
-            im_mask = np.zeros((im_h, im_w), dtype=np.uint8)
-
-            x_0 = max(ref_box[0], 0)
-            x_1 = min(ref_box[2] + 1, im_w)
-            y_0 = max(ref_box[1], 0)
-            y_1 = min(ref_box[3] + 1, im_h)
-
-            im_mask[y_0:y_1, x_0:x_1] = mask[
-                (y_0 - ref_box[1]):(y_1 - ref_box[1]),
-                (x_0 - ref_box[0]):(x_1 - ref_box[0])
-            ]
-
-            # Get RLE encoding used by the COCO evaluation API
-            rle = mask_util.encode(
-                np.array(im_mask[:, :, np.newaxis], order='F')
-            )[0]
-            segms.append(rle)
-
-            mask_ind += 1
-
-        cls_segms[j] = segms
+        # for _ in range(cls_boxes[j].shape[0]):
+        #     if cfg.MRCNN.CLS_SPECIFIC_MASK:
+        #         padded_mask[1:-1, 1:-1] = masks[mask_ind, j, :, :]
+        #     else:
+        #         padded_mask[1:-1, 1:-1] = masks[mask_ind, 0, :, :]
+        #
+        #     ref_box = ref_boxes[mask_ind, :]
+        #     w = ref_box[2] - ref_box[0] + 1
+        #     h = ref_box[3] - ref_box[1] + 1
+        #     w = np.maximum(w, 1)
+        #     h = np.maximum(h, 1)
+        #
+        #     mask = cv2.resize(padded_mask, (w, h))
+        #     mask = np.array(mask > cfg.MRCNN.THRESH_BINARIZE, dtype=np.uint8)
+        #     im_mask = np.zeros((im_h, im_w), dtype=np.uint8)
+        #
+        #     x_0 = max(ref_box[0], 0)
+        #     x_1 = min(ref_box[2] + 1, im_w)
+        #     y_0 = max(ref_box[1], 0)
+        #     y_1 = min(ref_box[3] + 1, im_h)
+        #
+        #     im_mask[y_0:y_1, x_0:x_1] = mask[
+        #                                 (y_0 - ref_box[1]):(y_1 - ref_box[1]),
+        #                                 (x_0 - ref_box[0]):(x_1 - ref_box[0])
+        #                                 ]
+        #
+        #     # Get RLE encoding used by the COCO evaluation API
+        #     rle = mask_util.encode(
+        #         np.array(im_mask[:, :, np.newaxis], order='F')
+        #     )[0]
+        #     segms.append(rle)
+        #
+        #     mask_ind += 1
+        #
+        # cls_segms[j] = segms
 
     assert mask_ind == masks.shape[0]
     return cls_segms
+
+
+def test(k, im_w, im_h, ref_boxes, padded_mask, masks, j):
+    # timers['maskResize'].tic()
+    # segms = []
+    mask_ind = j - 1 + k
+    if cfg.MRCNN.CLS_SPECIFIC_MASK:
+        padded_mask[1:-1, 1:-1] = masks[mask_ind, j, :, :]
+    else:
+        padded_mask[1:-1, 1:-1] = masks[mask_ind, 0, :, :]
+
+    ref_box = ref_boxes[mask_ind, :]
+    w = ref_box[2] - ref_box[0] + 1
+    h = ref_box[3] - ref_box[1] + 1
+    w = np.maximum(w, 1)
+    h = np.maximum(h, 1)
+
+    mask = cv2.resize(padded_mask, (w, h))
+    mask = np.array(mask > cfg.MRCNN.THRESH_BINARIZE, dtype=np.uint8)
+    im_mask = np.zeros((im_h, im_w), dtype=np.uint8)
+
+    x_0 = max(ref_box[0], 0)
+    x_1 = min(ref_box[2] + 1, im_w)
+    y_0 = max(ref_box[1], 0)
+    y_1 = min(ref_box[3] + 1, im_h)
+
+    im_mask[y_0:y_1, x_0:x_1] = mask[
+                                (y_0 - ref_box[1]):(y_1 - ref_box[1]),
+                                (x_0 - ref_box[0]):(x_1 - ref_box[0])
+                                ]
+    # timers['maskResize'].toc()
+    # timers['maskRLE'].tic()
+    # Get RLE encoding used by the COCO evaluation API
+    rle = mask_util.encode(
+        np.array(im_mask[:, :, np.newaxis], order='F')
+    )[0]
+
+    return [rle, mask_ind]
+    # timers['maskRLE'].toc()
 
 
 def keypoint_results(cls_boxes, pred_heatmaps, ref_boxes):

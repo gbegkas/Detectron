@@ -48,6 +48,8 @@ import signal
 import threading
 import time
 import uuid
+import cv2
+import os
 from six.moves import queue as Queue
 
 from caffe2.python import core, workspace
@@ -132,6 +134,28 @@ class RoIDataLoader(object):
             db_inds = self._get_next_minibatch_inds()
             minibatch_db = [self._roidb[i] for i in db_inds]
             blobs, valid = get_minibatch(minibatch_db)
+
+            # img = np.asarray([blobs['data'][0][2], blobs['data'][0][1], blobs['data'][0][0]]).astype('uint8')[0]
+            # matrix = blobs['im_tr_matrix']
+            # scale = blobs['im_info'][0][2]
+            # for gt_roi in minibatch_db[0]['boxes']:
+            #     w, h = gt_roi[2] - gt_roi[0], gt_roi[3] - gt_roi[1]
+            #     nw, nh = int(w * scale), int(h * scale)
+            #     center_x, center_y = gt_roi[0] + w / 2, gt_roi[1] + h / 2
+            #     new_center = np.dot(matrix, [[center_x], [center_y], [1.0]]).astype('int')
+            #     new_center_x = int(new_center[0][0])
+            #     new_center_y = int(new_center[1][0])
+            #     nbx = int(new_center_x - nw / 2)
+            #     nby = int(new_center_y - nh / 2)
+            #     nbx2 = int(nbx + nw)
+            #     nby2 = int(nby + nh)
+            #     cv2.rectangle(img, (nbx, nby), (nbx2, nby2), (255, 0, 0), 2)
+            #     #gt_rois.append([nbx, nby, nbx2, nby2])
+            # if cv2.imwrite(os.path.join(cfg.OUTPUT_DIR, str(minibatch_db[0]['id'])+'.png'), img):
+            #     printed = 1
+            # else:
+            #     printed = 0
+            pass
         return blobs
 
     def _shuffle_roidb_inds(self):

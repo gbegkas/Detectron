@@ -37,6 +37,36 @@ _RAW_DIR = 'raw_dir'
 
 # Available datasets
 _DATASETS = {
+    'CBIS_DDSM_train': {
+        _IM_DIR:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM/Train/shapes',
+        _ANN_FN:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM/Train/instances_shape_train2019.json'
+    },
+    'CBIS_DDSM_test': {
+        _IM_DIR:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM_resized/Test/shapes',
+        _ANN_FN:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM_resized/Test/instances_shape_test2019.json'
+    },
+    'CBIS_DDSM_val': {
+        _IM_DIR:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM/Validation/shapes',
+        _ANN_FN:
+            '/mnt/genesis/vegas/Databases/CBIS-DDSM/Validation/instances_shape_val2019.json'
+    },
+    'INbreast_train': {
+        _IM_DIR:
+            '/mnt/genesis/vegas/Databases/INbreast/Train/shapes',
+        _ANN_FN:
+            '/mnt/genesis/vegas/Databases/INbreast/Train/instances_shape_train2019.json'
+    },
+    'INbreast_test': {
+        _IM_DIR:
+            '/mnt/genesis/vegas/Databases/INbreast/Test/shapes',
+        _ANN_FN:
+            '/mnt/genesis/vegas/Databases/INbreast/Test/instances_shape_test2019.json'
+    },
     'cityscapes_fine_instanceonly_seg_train': {
         _IM_DIR:
             _DATA_DIR + '/cityscapes/images',

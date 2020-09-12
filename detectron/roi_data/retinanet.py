@@ -61,6 +61,7 @@ def get_retinanet_blob_names(is_training=True):
     """
     # im_info: (height, width, image scale)
     blob_names = ['im_info']
+    blob_names += ['im_tr_matrix']
     assert cfg.FPN.FPN_ON, "RetinaNet uses FPN for dense detection"
     # Same format as RPN blobs, but one per FPN level
     if is_training:
@@ -75,7 +76,7 @@ def get_retinanet_blob_names(is_training=True):
     return blob_names
 
 
-def add_retinanet_blobs(blobs, im_scales, roidb, image_width, image_height):
+def add_retinanet_blobs(blobs, im_tr_matrix, roidb, image_width, image_height, im_scales):
     """Add RetinaNet blobs."""
     # RetinaNet is applied to many feature levels, as in the FPN paper
     k_max, k_min = cfg.FPN.RPN_MAX_LEVEL, cfg.FPN.RPN_MIN_LEVEL
@@ -100,19 +101,39 @@ def add_retinanet_blobs(blobs, im_scales, roidb, image_width, image_height):
 
     blobs['retnet_fg_num'], blobs['retnet_bg_num'] = 0.0, 0.0
     for im_i, entry in enumerate(roidb):
+        transformation_matrix = im_tr_matrix[im_i]
         scale = im_scales[im_i]
-        im_height = np.round(entry['height'] * scale)
-        im_width = np.round(entry['width'] * scale)
+        # image_height = im_shapes[im_i][0]
+        # image_width = im_shapes[im_i][1]
         gt_inds = np.where(
             (entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
         assert len(gt_inds) > 0, \
             'Empty ground truth empty for image is not allowed. Please check.'
 
-        gt_rois = entry['boxes'][gt_inds, :] * scale
+        # gt_rois = entry['boxes'][gt_inds, :] * scale
         gt_classes = entry['gt_classes'][gt_inds]
+        gt_rois = []
+        for gt_roi in roidb[im_i]['boxes']:
+            w, h = gt_roi[2] - gt_roi[0], gt_roi[3] - gt_roi[1]
+            nw, nh = int(w * scale), int(h * scale)
+            center_x, center_y = gt_roi[0] + w / 2, gt_roi[1] + h / 2
+            new_center = np.dot(transformation_matrix, [[center_x], [center_y], [1.0]]).astype('int')
+            new_center_x = int(new_center[0][0])
+            new_center_y = int(new_center[1][0])
+            nbx = int(new_center_x - nw / 2)
+            nby = int(new_center_y - nh / 2)
+            nbx2 = int(nbx + nw)
+            nby2 = int(nby + nh)
+            gt_rois.append([nbx, nby, nbx2, nby2])
 
-        im_info = np.array([[im_height, im_width, scale]], dtype=np.float32)
+        im_info = np.array([[image_height, image_width, scale]], dtype=np.float32)
+        matrix = np.array(transformation_matrix, dtype=np.float32)
         blobs['im_info'].append(im_info)
+        blobs['im_tr_matrix'].append(matrix)
+        gt_rois = np.asarray(gt_rois, dtype=np.float32)
+
+        # im_info = np.array([[image_height, image_width, scale]], dtype=np.float32)
+        # blobs['im_info'].append(im_info)
 
         retinanet_blobs, fg_num, bg_num = _get_retinanet_blobs(
             foas, all_anchors, gt_rois, gt_classes, image_width, image_height)

@@ -81,7 +81,7 @@ def evaluate_boxes(dataset, all_boxes, output_dir, use_matlab=False):
         )
         box_results = _coco_eval_to_box_results(coco_eval)
     elif _use_cityscapes_evaluator(dataset):
-        logger.warn('Cityscapes bbox evaluated using COCO metrics/conversions')
+        logger.warning('Cityscapes bbox evaluated using COCO metrics/conversions')
         coco_eval = json_dataset_evaluator.evaluate_boxes(
             dataset, all_boxes, output_dir, use_salt=not_comp, cleanup=not_comp
         )
@@ -156,11 +156,7 @@ def evaluate_box_proposals(dataset, roidb):
     for limit in [100, 1000]:
         for area, suffix in areas.items():
             stats = json_dataset_evaluator.evaluate_box_proposals(
-                dataset,
-                roidb,
-                area=area,
-                limit=limit,
-                class_specific=cfg.TEST.CLASS_SPECIFIC_AR
+                dataset, roidb, area=area, limit=limit
             )
             key = 'AR{}@{:d}'.format(suffix, limit)
             res['box_proposal'][key] = stats['ar']

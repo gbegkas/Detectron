@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# !/usr/bin/env python
 
 # Copyright (c) 2017-present, Facebook, Inc.
 #
@@ -37,6 +37,7 @@ from caffe2.python import utils
 from google.protobuf import text_format
 
 from detectron.utils.io import save_object
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -79,11 +80,11 @@ def normalize_resnet_name(name):
         #  res2a_branch1 -> res2_0_branch1
         chunk = name[len('res'):name.find('_')]
         name = (
-            'res' + chunk[0] + '_' + str(
-                int(chunk[2:]) if len(chunk) > 2  # e.g., "b1" -> 1
-                else ord(chunk[1]) - ord('a')
-            ) +  # e.g., "a" -> 0
-            name[name.find('_'):]
+                'res' + chunk[0] + '_' + str(
+            int(chunk[2:]) if len(chunk) > 2  # e.g., "b1" -> 1
+            else ord(chunk[1]) - ord('a')
+        ) +  # e.g., "a" -> 0
+                name[name.find('_'):]
         )
     return name
 
@@ -222,3 +223,6 @@ if __name__ == '__main__':
         args.prototxt_file_name, args.caffemodel_file_name
     )
     pickle_weights(args.out_file_name, weights)
+
+
+

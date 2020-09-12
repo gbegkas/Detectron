@@ -1,0 +1,42 @@
+MODEL:
+  TYPE: generalized_rcnn
+  CONV_BODY: FPN.add_fpn_ResNet50_conv5_body
+  NUM_CLASSES: 2
+  FASTER_RCNN: True
+NUM_GPUS: 1
+SOLVER:
+  WEIGHT_DECAY: 0.0001
+  LR_POLICY: steps_with_lrs
+  BASE_LR: 0.00001
+  GAMMA: 1.0
+  MAX_ITER: 20000
+  STEPS: [0, 11000]
+  LRS: [0.00001, 0.000004]
+FPN:
+  FPN_ON: True
+  MULTILEVEL_ROIS: True
+  MULTILEVEL_RPN: True
+FAST_RCNN:
+  ROI_BOX_HEAD: fast_rcnn_heads.add_roi_2mlp_head
+  ROI_XFORM_METHOD: RoIAlign
+  ROI_XFORM_RESOLUTION: 7
+  ROI_XFORM_SAMPLING_RATIO: 2
+TRAIN:
+  #WEIGHTS: https://s3-us-west-2.amazonaws.com/detectron/ImageNetPretrained/MSRA/R-50.pkl
+  DATASETS: ('CBIS_DDSMtrain',)
+  SCALES: (800,)
+  MAX_SIZE: 1333
+  BATCH_SIZE_PER_IM: 512
+  RPN_PRE_NMS_TOP_N: 2000  # Per FPN level
+  SNAPSHOT_ITERS: 250
+TEST:
+  FORCE_JSON_DATASET_EVAL: True
+  DATASETS: ('INbreast',)
+  SCALE: 800
+  MAX_SIZE: 1333
+  NMS: 0.5
+  RPN_PRE_NMS_TOP_N: 1000  # Per FPN level
+  RPN_POST_NMS_TOP_N: 1000
+  SCORE_THRESH: 0.0
+OUTPUT_DIR: /media/gru/426be4ea-8d97-4683-bbb0-15978fea1da4/vegas/Detectron-output/scratch_e2e_faster_R-50-FPN
+DOWNLOAD_CACHE: /media/gru/426be4ea-8d97-4683-bbb0-15978fea1da4/vegas/Cache

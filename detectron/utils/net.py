@@ -91,12 +91,12 @@ def initialize_gpu_from_weights_file(model, weights_file, gpu_id=0):
             dst_name = core.ScopedName(unscoped_param_name)
             has_momentum = src_name + '_momentum' in src_blobs
             has_momentum_str = ' [+ momentum]' if has_momentum else ''
-            logger.info(
-                '{:s}{:} loaded from weights file into {:s}: {}'.format(
-                    src_name, has_momentum_str, dst_name, src_blobs[src_name]
-                    .shape
-                )
-            )
+            # logger.info(
+            #     '{:s}{:} loaded from weights file into {:s}: {}'.format(
+            #         src_name, has_momentum_str, dst_name, src_blobs[src_name]
+            #         .shape
+            #     )
+            # )
             if dst_name in ws_blobs:
                 # If the blob is already in the workspace, make sure that it
                 # matches the shape of the loaded blob
@@ -129,8 +129,8 @@ def initialize_gpu_from_weights_file(model, weights_file, gpu_id=0):
             with c2_utils.CpuScope():
                 workspace.FeedBlob(
                     '__preserve__/{:s}'.format(src_name), src_blobs[src_name])
-                logger.info(
-                    '{:s} preserved in workspace (unused)'.format(src_name))
+                # logger.info(
+                #     '{:s} preserved in workspace (unused)'.format(src_name))
 
 
 def save_model_to_weights_file(weights_file, model):

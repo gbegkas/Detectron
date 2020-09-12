@@ -1,0 +1,3 @@
+--cfg /mnt/Cargo_2/Diploma_Thesis/mass_detection_giwrgos/Configs/e2e_faster_rcnn_R-50-FPN_1x.yaml TEST.WEIGHTS /home/gru/RESULTS-detectron/fasterR50FPN/model_final.pkl
+
+--cfg /mnt/Cargo_2/Diploma_Thesis/mass_detection_giwrgos/Configs/retinanet_R-50-FPN_1x.yaml TEST.WEIGHTS /home/gru/RESULTS-detectron/retinanetR50/model_iter12249.pkl

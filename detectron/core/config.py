@@ -111,14 +111,37 @@ __C.TRAIN.BG_THRESH_LO = 0.0
 # Use horizontally-flipped images during training?
 __C.TRAIN.USE_FLIPPED = True
 
+# Use vertically-flipped images during training
+__C.TRAIN.USE_V_FLIPPED = True
+
+# Apply Rotation tranformation for train-time data augmentation
+# Rotation around the center for an angle uniformly distributed in the interval
+# E.g. (-20, 20) for angles in interval [-20, 20]
+__C.TRAIN.ROTATION_ANGLES = (0, 0)
+
+# Apply Shear transformation for train-time data augmentation
+# Shear transformation with intensity uniformly distributed in the interval
+# E.g. (-2, 2) for intesitiies in interval [-2, 2]
+__C.TRAIN.SHEAR_INT = (0, 0)
+
+# Apply Zoom transformation for train-time data augmentation
+# Zoom transformation with zoom factor uniformly distributed in the interval
+# E.g. (0.8, 1.2) for zoom factor in interval [0.8, 1.2]
+__C.TRAIN.ZOOM = (1, 1)
+
+# Apply Channel shifting for train-time data augmentation
+# Channel shift with intesity uniformly distributed in the interval
+# E.g. (-0.1, 0.1) for zoom factor in interval [-0.1, 0.1]
+__C.TRAIN.CHANNEL_SHIFT = (0, 0)
+
 # Overlap required between an RoI and a ground-truth box in order for that
 # (RoI, gt box) pair to be used as a bounding-box regression training example
 __C.TRAIN.BBOX_THRESH = 0.5
 
 # Snapshot (model checkpoint) period
-# Divide by NUM_GPUS to determine actual period (e.g., 80000/8 => 10000 iters)
+# Divide by NUM_GPUS to determine actual period (e.g., 20000/8 => 2500 iters)
 # to allow for linear training schedule scaling
-__C.TRAIN.SNAPSHOT_ITERS = 80000
+__C.TRAIN.SNAPSHOT_ITERS = 20000
 
 # Train using these proposals
 # During training, all proposals specified in the file are used (no limit is
@@ -136,9 +159,6 @@ __C.TRAIN.ASPECT_GROUPING = True
 # ---------------------------------------------------------------------------- #
 # RPN training options
 # ---------------------------------------------------------------------------- #
-
-# Run GenerateProposals on GPU if set to True
-__C.TRAIN.GENERATE_PROPOSALS_ON_GPU = False
 
 # Minimum overlap required between an anchor and ground-truth box for the
 # (anchor, gt box) pair to be a positive example (IOU >= thresh ==> positive RPN
@@ -244,9 +264,6 @@ __C.TEST.BBOX_REG = True
 # Test using these proposal files (must correspond with TEST.DATASETS)
 __C.TEST.PROPOSAL_FILES = ()
 
-# Run GenerateProposals on GPU if set to True
-__C.TEST.GENERATE_PROPOSALS_ON_GPU = False
-
 # Limit on the number of proposals per image used during inference
 __C.TEST.PROPOSAL_LIMIT = 2000
 
@@ -275,6 +292,10 @@ __C.TEST.DETECTIONS_PER_IM = 100
 # detections that will slow down inference post processing steps (like NMS)
 __C.TEST.SCORE_THRESH = 0.05
 
+# Intersection of Union threshold between the ground truth and the detection boxes for the
+# detection to be True Possitive
+__C.TEST.IOU = 0.5
+
 # Save detection results files if True
 # If false, results files are cleaned up (they can be large) after local
 # evaluation
@@ -290,11 +311,6 @@ __C.TEST.FORCE_JSON_DATASET_EVAL = False
 # Not set for 1-stage models and 2-stage models with RPN subnetwork enabled
 __C.TEST.PRECOMPUTED_PROPOSALS = True
 
-# Evaluate proposals in class-specific Average Recall (AR).
-# It means that one first computes AR within each category and then averages
-# over the categories. It is not biased towards the AR of frequent categories
-# compared with class-agnostic AR.
-__C.TEST.CLASS_SPECIFIC_AR = False
 
 # ---------------------------------------------------------------------------- #
 # Test-time augmentations for bounding box detection
@@ -592,15 +608,9 @@ __C.SOLVER.LR_POLICY = 'step'
 #   SOLVER.STEPS = [0, 60000, 80000]
 #   SOLVER.LRS = [0.02, 0.002, 0.0002]
 #   lr = LRS[current_step]
-# 'cosine_decay'
-#   lr = SOLVER.BASE_LR * (cos(PI * cur_iter / SOLVER.MAX_ITER) * 0.5 + 0.5)
-# 'exp_decay'
-#   lr smoothly decays from SOLVER.BASE_LR to SOLVER.GAMMA * SOLVER.BASE_LR
-#   lr = SOLVER.BASE_LR * exp(np.log(SOLVER.GAMMA) * cur_iter / SOLVER.MAX_ITER)
 
 # Hyperparameter used by the specified policy
 # For 'step', the current LR is multiplied by SOLVER.GAMMA at each step
-# For 'exp_decay', SOLVER.GAMMA is the ratio between the final and initial LR.
 __C.SOLVER.GAMMA = 0.1
 
 # Uniform step size for 'steps' policy
@@ -1142,6 +1152,7 @@ def load_cfg(cfg_to_load):
         cfg_to_load = cfg_to_load.replace(old_module, new_module)
     # Import inline due to a circular dependency between env.py and config.py
     import detectron.utils.env as envu
+    # import yaml
     return envu.yaml_load(cfg_to_load)
 
 
@@ -1161,7 +1172,7 @@ def merge_cfg_from_list(cfg_list):
     """Merge config keys, values in a list (e.g., from command line) into the
     global config. For example, `cfg_list = ['TEST.NMS', 0.5]`.
     """
-    assert len(cfg_list) % 2 == 0
+    #assert len(cfg_list) % 2 == 0
     for full_key, v in zip(cfg_list[0::2], cfg_list[1::2]):
         if _key_is_deprecated(full_key):
             continue
@@ -1246,7 +1257,7 @@ def _decode_cfg_value(v):
     """Decodes a raw config value (e.g., from a yaml config files or command
     line argument) into a Python object.
     """
-    # Configs parsed from raw yaml will contain dictionary keys that need to be
+    # Mammography parsed from raw yaml will contain dictionary keys that need to be
     # converted to AttrDict objects
     if isinstance(v, dict):
         return AttrDict(v)

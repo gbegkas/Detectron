@@ -26,6 +26,7 @@ import datetime
 import logging
 import numpy as np
 import os
+import yaml
 
 from caffe2.python import workspace
 
@@ -39,11 +40,17 @@ from detectron.datasets.json_dataset import JsonDataset
 from detectron.modeling import model_builder
 from detectron.utils.io import save_object
 from detectron.utils.timer import Timer
+from sklearn.metrics import roc_curve
+from sklearn.metrics import auc
+import matplotlib.pyplot as plt
 import detectron.utils.c2 as c2_utils
 import detectron.utils.env as envu
 import detectron.utils.net as net_utils
 import detectron.utils.subprocess as subprocess_utils
 import detectron.utils.vis as vis_utils
+import detectron.utils.metrics as metrics
+import detectron.utils.plot as plot
+import detectron.utils.save as save
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +106,7 @@ def run_inference(
             for i in range(len(cfg.TEST.DATASETS)):
                 dataset_name, proposal_file = get_inference_dataset(i)
                 output_dir = get_output_dir(dataset_name, training=False)
-                results = parent_func(
+                results, auc_score, afroc_score = parent_func(
                     weights_file,
                     dataset_name,
                     proposal_file,
@@ -108,7 +115,7 @@ def run_inference(
                 )
                 all_results.update(results)
 
-            return all_results
+            return all_results, auc_score, afroc_score
         else:
             # Subprocess child case:
             # In this case test_net was called via subprocess.Popen to execute on a
@@ -124,7 +131,7 @@ def run_inference(
                 gpu_id=gpu_id
             )
 
-    all_results = result_getter()
+    all_results, auc_score, afroc_score = result_getter()
     if check_expected_results and is_parent:
         task_evaluation.check_expected_results(
             all_results,
@@ -133,7 +140,7 @@ def run_inference(
         )
         task_evaluation.log_copy_paste_friendly_results(all_results)
 
-    return all_results
+    return all_results, auc, afroc_score
 
 
 def test_net_on_dataset(
@@ -148,21 +155,40 @@ def test_net_on_dataset(
     dataset = JsonDataset(dataset_name)
     test_timer = Timer()
     test_timer.tic()
+    model = ''
     if multi_gpu:
         num_images = len(dataset.get_roidb())
         all_boxes, all_segms, all_keyps = multi_gpu_test_net_on_dataset(
             weights_file, dataset_name, proposal_file, num_images, output_dir
         )
     else:
-        all_boxes, all_segms, all_keyps = test_net(
+        all_boxes, all_segms, all_keyps, model = test_net(
             weights_file, dataset_name, proposal_file, output_dir, gpu_id=gpu_id
         )
+
     test_timer.toc()
     logger.info('Total inference time: {:.3f}s'.format(test_timer.average_time))
     results = task_evaluation.evaluate_all(
         dataset, all_boxes, all_segms, all_keyps, output_dir
     )
-    return results
+
+    roc_data = metrics.calculate_roc(all_boxes, dataset, cfg.TEST.IOU)
+    froc_data = metrics.calculate_froc(all_boxes, dataset, cfg.TEST.IOU)
+    auc_score = {dataset.name: {u'box': {u'AUC': auc(roc_data[0], roc_data[1])}}}
+    afroc_score = np.trapz(froc_data[0], froc_data[2])
+    afroc = {dataset.name: {u'box': {u'AFROC': afroc_score}}}
+    print('Afroc score: {:.4f}'.format(afroc_score))
+
+    plot.plot_roc(roc_data, auc_score[dataset.name][u'box'][u'AUC'], dataset, model, output_dir)
+    plot.plot_froc(froc_data, dataset, model, output_dir)
+    plot.plot_afroc(froc_data, dataset, model, output_dir)
+
+    save.np_save(np.stack(roc_data), 'roc', dataset, model, output_dir)
+    save.np_save(np.stack(froc_data), 'froc', dataset, model, output_dir)
+
+    results[dataset_name][u'box'].update(auc_score[dataset.name][u'box'])
+    results[dataset_name][u'box'].update(afroc[dataset.name][u'box'])
+    return results, auc_score, afroc_score
 
 
 def multi_gpu_test_net_on_dataset(
@@ -200,7 +226,7 @@ def multi_gpu_test_net_on_dataset(
             all_segms[cls_idx] += all_segms_batch[cls_idx]
             all_keyps[cls_idx] += all_keyps_batch[cls_idx]
     det_file = os.path.join(output_dir, 'detections.pkl')
-    cfg_yaml = envu.yaml_dump(cfg)
+    cfg_yaml = yaml.dump(cfg)
     save_object(
         dict(
             all_boxes=all_boxes,
@@ -286,6 +312,15 @@ def test_net(
                     start_ind + num_images, det_time, misc_time, eta
                 )
             )
+            # logger.info(
+            #     (
+            #         'im_detect: range [{:d}, {:d}] of {:d}: '
+            #         '{:d}/{:d} resize + RLE: {:.3f}s + {:.3f}s '
+            #     ).format(
+            #         start_ind + 1, end_ind, total_num_images, start_ind + i + 1,
+            #         start_ind + num_images, timers['maskResize'].average_time, timers['maskRLE'].average_time
+            #     )
+            # )
 
         if cfg.VIS:
             im_name = os.path.splitext(os.path.basename(entry['image']))[0]
@@ -302,7 +337,7 @@ def test_net(
                 show_class=True
             )
 
-    cfg_yaml = envu.yaml_dump(cfg)
+    cfg_yaml = yaml.dump(cfg)
     if ind_range is not None:
         det_name = 'detection_range_%s_%s.pkl' % tuple(ind_range)
     else:
@@ -317,7 +352,7 @@ def test_net(
         ), det_file
     )
     logger.info('Wrote detections to: {}'.format(os.path.abspath(det_file)))
-    return all_boxes, all_segms, all_keyps
+    return all_boxes, all_segms, all_keyps, model.name
 
 
 def initialize_model_from_cfg(weights_file, gpu_id=0):
@@ -393,3 +428,193 @@ def extend_results(index, all_res, im_res):
     # Skip cls_idx 0 (__background__)
     for cls_idx in range(1, len(im_res)):
         all_res[cls_idx][index] = im_res[cls_idx]
+
+
+"""
+def get_iou(bb1, bb2):
+
+    box1 = [int(round(i)) for i in bb1]
+    box2 = [int(round(i)) for i in bb2]
+
+    # determine the coordinates of the intersection rectangle
+    x_left = max(box1[0], box2[0])
+    y_top = max(box1[1], box2[1])
+    x_right = min(box1[2], box2[2])
+    y_bottom = min(box1[3], box2[3])
+
+    intersection_area = max((x_right - x_left, 0)) * max((y_bottom - y_top), 0)
+
+    # compute the area of both AABBs
+    bb1_area = abs((box1[2] - box1[0]) * (box1[3] - box1[1]))
+    bb2_area = abs((box2[2] - box2[0]) * (box2[3] - box2[1]))
+
+    iou = intersection_area / float(bb1_area + bb2_area - intersection_area)
+    return iou
+
+
+def calculate_auc(all_boxes, dataset, weights_file, output_dir, gpu_id=0):
+    y_true = []
+    scores = []
+    tpbs = []
+    fpbs = []
+    gt = []
+    num_of_tumors = 0
+    roidb = dataset.get_roidb()
+    model = initialize_model_from_cfg(weights_file, gpu_id=gpu_id)
+
+    for i, boxes in enumerate(all_boxes[1]):
+        temp_tpbs = []
+        temp_fpbs = []
+        image_gt = []
+        num_of_tumors += len(roidb[i]['gt_classes'])
+        for box in boxes:
+            scores.append(box[4])
+            y_true_temp = 0
+            for roi in roidb[i][u'boxes']:
+                if get_iou(box[:-1], roi) >= 0.5:
+                    image_gt.append(box[4])
+                    y_true_temp = 1
+                    break
+            y_true.append(y_true_temp)
+            if y_true_temp == 0:
+                temp_fpbs.append(box[4])
+        gt.append(image_gt)
+
+        tpbs.append(temp_tpbs)
+        fpbs.append(temp_fpbs)
+
+    unlisted_FPs = [item for sublist in fpbs for item in sublist]
+    unlisted_TPs = [item for sublist in tpbs for item in sublist]
+
+    total_FPs, total_TPs, detected_gt = [], [], []
+    all_probs = sorted(set(unlisted_FPs + unlisted_TPs))
+    c = 0
+    for Thresh in all_probs[1::int(20/len(all_probs))]:
+        t = []
+        for image in gt:
+            for pb in image:
+                if pb >= Thresh:
+                    t.append(1)
+                    break
+        c += 1
+
+        detected_gt.append(sum(t))
+        total_FPs.append((np.asarray(unlisted_FPs) >= Thresh).sum())
+        # total_TPs.append((np.asarray(unlisted_TPs) >= Thresh).sum())
+        if c % 10 == 0:
+            print(str(c) + '/' + str(int(len(all_probs)/1000) - 1))
+    total_FPs.append(0)
+    total_TPs.append(0)
+    detected_gt.append(0)
+
+    temp_FPs = total_FPs
+    total_FPs = np.asarray(total_FPs) / float(len(all_boxes[1]))
+    total_sensitivity = np.asarray(detected_gt) / float(num_of_tumors)
+    fpr = np.asarray(temp_FPs) / float(len(unlisted_FPs))
+
+    afroc_auc = np.trapz(total_sensitivity[::-1], fpr[::-1])
+
+    fig = plt.figure()
+    plt.xlabel('FPI', fontsize=12)
+    plt.ylabel('TPR', fontsize=12)
+
+    fig.suptitle('Free response receiver operating characteristic curve', fontsize=12)
+    plt.plot(total_FPs, total_sensitivity, '-', color='#000000')
+    plt.ylim([0, 1])
+    plt.savefig(os.path.join(output_dir,
+                             'froc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.pdf'))
+
+    fig = plt.figure()
+    plt.xlabel('FPR', fontsize=12)
+    plt.ylabel('TPR', fontsize=12)
+
+    fig.suptitle('Alternative free response receiver operating characteristic curve', fontsize=12)
+
+    plt.plot(fpr, total_sensitivity, '-', color='#000000')
+    plt.ylim([0, 1])
+    plt.legend(loc="lower right")
+    plt.savefig(os.path.join(output_dir,
+                             'afroc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.pdf'))
+
+    nfp, nsens, nthresh = [], [], []
+    for i, f in enumerate(total_FPs):
+        if f <= 20:
+            nfp.append(f)
+            nsens.append(total_sensitivity[i])
+
+    fig = plt.figure()
+    plt.xlabel('FPI', fontsize=12)
+    plt.ylabel('TPR', fontsize=12)
+
+    fig.suptitle('Free response receiver operating characteristic curve', fontsize=12)
+    plt.plot(nfp, nsens, '-', color='#000000')
+    plt.ylim([0, 1])
+    np.save(os.path.join(output_dir, 'froc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name)),
+            [total_FPs, total_sensitivity, all_probs])
+
+    plt.savefig(os.path.join(output_dir,
+                             'froc_curve_20_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.pdf'))
+
+    if max(y_true) == 0:
+        auc = -1
+        auc_score = {dataset.name: {u'box': {u'AUC': auc}}}
+        print('Auc score:{:.4f}'.format(auc))
+        return auc_score
+    neg = y_true.count(0)
+    fpr, tpr, thresholds = roc_curve(np.array(y_true), np.array(scores))
+    auc = roc_auc_score(np.array(y_true), np.array(scores))
+    auc_score = {dataset.name: {u'box': {u'AUC': auc}}}
+    fpi = [neg/len(all_boxes)*x for x in fpr]
+
+    print('Auc score:{:.4f}'.format(auc))
+    print('Afroc Auc: {:.4f}'.format(afroc_auc))
+    np.save('{out}/{model}_{dataset}_roc'.format(out=output_dir, model=model.name, dataset=dataset.name),
+            [fpr, tpr, thresholds])
+    np.save('{out}/{model}_{dataset}_froc'.format(out=output_dir, model=model.name, dataset=dataset.name),
+            [fpi, tpr, thresholds])
+    for i, entry in enumerate(tpr):
+        if entry == 1:
+            f = fpr[i]
+            t = thresholds[i]
+            break
+
+    print('fpr: {f}'.format(f=f))
+    print('threshold: {t}'.format(t=t))
+
+    plt.figure()
+    lw = 2
+    plt.plot(fpr, tpr, color='darkorange',
+             lw=lw, label='ROC curve (area = %0.4f)' % auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC curve of Model: {backbone} in {dataset} Dataset'
+              .format(backbone=model.name, dataset=dataset.name))
+    plt.legend(loc="lower right")
+    plt.savefig(
+        os.path.join(output_dir, 'roc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.eps'),
+        format='eps')
+    plt.savefig(
+        os.path.join(output_dir, 'roc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.png'))
+
+    plt.figure()
+    lw = 2
+    plt.plot(fpi, tpr, color='darkorange',
+             lw=lw, label='ROC curve (area = %0.4f)' % auc)
+    # plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 10.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positives per Image')
+    plt.ylabel('True Positive Rate')
+    plt.title('FROC curve of Model: {backbone} in {dataset} Dataset'
+              .format(backbone=model.name, dataset=dataset.name))
+    plt.legend(loc="lower right")
+    plt.savefig(
+        os.path.join(output_dir, 'froc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.eps'),
+        format='eps')
+    plt.savefig(
+        os.path.join(output_dir, 'froc_curve_{back}_{dataset}'.format(back=model.name, dataset=dataset.name) + '.png'))
+    return auc_score
+"""

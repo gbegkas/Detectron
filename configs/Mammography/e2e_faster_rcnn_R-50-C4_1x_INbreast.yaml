@@ -1,0 +1,51 @@
+MODEL:
+  TYPE: generalized_rcnn
+  CONV_BODY: ResNet.add_ResNet50_conv4_body
+  NUM_CLASSES: 2
+  FASTER_RCNN: True
+NUM_GPUS: 1
+#DATA_LOADER:
+#  NUM_THREADS: 1
+#  MINIBATCH_QUEUE_SIZE: 1
+#  BLOBS_QUEUE_CAPACITY: 1
+SOLVER:
+  WEIGHT_DECAY: 0.0001
+  LR_POLICY: steps_with_lrs
+  BASE_LR: 0.00001
+  GAMMA: 1.0
+  MAX_ITER: 100000
+  STEPS: [0, 50000]
+  LRS: [0.00001, 0.00001]
+RPN:
+  SIZES: (32, 64, 128, 256, 512)
+FAST_RCNN:
+  ROI_BOX_HEAD: ResNet.add_ResNet_roi_conv5_head
+  ROI_XFORM_METHOD: RoIAlign
+TRAIN:
+  WEIGHTS: /mnt/genesis/vegas/CBIS_best_models/Faster-R50-C4/model_iter133999.pkl
+  DATASETS: ('INbreast_train',)
+  SCALES: (500, 600, 700, 800, 900, )
+  MAX_SIZE: 1333
+  IMS_PER_BATCH: 1
+  BATCH_SIZE_PER_IM: 512
+  SNAPSHOT_ITERS: 1000
+  USE_FLIPPED: True
+  USE_V_FLIPPED: True
+  ROTATION_ANGLES: (-20, 20)
+  SHEAR_INT: (-0.2, 0.2)
+  CHANNEL_SHIFT: (-0.1, 0.1)
+TEST:
+  WEIGHTS: /home/vegas/Data/Detectron_Output/e2e_faster_R-50-C4_lr-4/train/INbreast_train/generalized_rcnn/model_iter6999.pkl
+  FORCE_JSON_DATASET_EVAL: True
+  DATASETS: ('INbreast_test',)
+  DETECTIONS_PER_IM: -1
+  SCALE: 800
+  MAX_SIZE: 1333
+  NMS: 0.5
+  RPN_PRE_NMS_TOP_N: 6000
+  RPN_POST_NMS_TOP_N: 1000
+  SCORE_THRESH: 0.0
+OUTPUT_DIR: /mnt/genesis/vegas/Detectron_Output/e2e_faster_R-50-C4
+DOWNLOAD_CACHE: /mnt/genesis/vegas/Detectron-Cache
+#OUTPUT_DIR: /mnt/Cargo_2/Detectron_Output/e2e_faster_R-50-C4
+#DOWNLOAD_CACHE: /mnt/Cargo_2/Detectron-Cache

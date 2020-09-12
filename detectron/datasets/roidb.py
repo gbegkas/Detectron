@@ -48,6 +48,9 @@ def combined_roidb_for_training(dataset_names, proposal_files):
         if cfg.TRAIN.USE_FLIPPED:
             logger.info('Appending horizontally-flipped training examples...')
             extend_with_flipped_entries(roidb, ds)
+        if cfg.TRAIN.USE_V_FLIPPED:
+            logger.info('Appending vertically-flipped training examples...')
+            extend_with_v_flipped_entries(roidb, ds)
         logger.info('Loaded dataset: {:s}'.format(ds.name))
         return roidb
 
@@ -103,7 +106,43 @@ def extend_with_flipped_entries(roidb, dataset):
                 dataset.keypoints, dataset.keypoint_flip_map,
                 entry['gt_keypoints'], entry['width']
             )
-        flipped_entry['flipped'] = True
+        flipped_entry['h_flipped'] = True
+        flipped_roidb.append(flipped_entry)
+    roidb.extend(flipped_roidb)
+
+
+def extend_with_v_flipped_entries(roidb, dataset):
+    """Flip each entry in the given roidb and return a new roidb that is the
+    concatenation of the original roidb and the flipped entries.
+
+    "Flipping" an entry means that that image and associated metadata (e.g.,
+    ground truth boxes and object proposals) are vertically flipped.
+    """
+    flipped_roidb = []
+    for entry in roidb:
+        height = entry['height']
+        boxes = entry['boxes'].copy()
+        oldy1 = boxes[:, 1].copy()
+        oldy2 = boxes[:, 3].copy()
+        boxes[:, 1] = height - oldy2 - 1
+        boxes[:, 3] = height - oldy1 - 1
+        assert (boxes[:, 2] >= boxes[:, 0]).all()
+        flipped_entry = {}
+        dont_copy = ('boxes', 'segms', 'gt_keypoints', 'flipped')
+        for k, v in entry.items():
+            if k not in dont_copy:
+                flipped_entry[k] = v
+        flipped_entry['boxes'] = boxes
+        flipped_entry['segms'] = segm_utils.flip_segms(
+            entry['segms'], entry['height'], entry['width']
+        )
+        """TODO Vertically flipped keypoints"""
+        # if dataset.keypoints is not None:
+        #     flipped_entry['gt_keypoints'] = keypoint_utils.flip_keypoints(
+        #         dataset.keypoints, dataset.keypoint_flip_map,
+        #         entry['gt_keypoints'], entry['width']
+        #     )
+        flipped_entry['v_flipped'] = True
         flipped_roidb.append(flipped_entry)
     roidb.extend(flipped_roidb)
 
